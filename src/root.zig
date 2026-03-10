@@ -42,6 +42,11 @@ fn disconnect(self: *Self) void {
 pub fn connect(self: *Self) !void {
     self.context = try zimq.Context.init();
     self.socket = try zimq.Socket.init(self.context.?, .push);
+
+    // Set socket options here, after socket is created
+    try self.socket.?.set(.sndhwm, 500);
+    try self.socket.?.set(.linger, 0);
+
     try self.socket.?.connect(self.stream_url);
     std.debug.print("data stream connected!\n", .{});
 }
