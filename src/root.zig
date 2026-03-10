@@ -41,13 +41,28 @@ fn disconnect(self: *Self) void {
 
 pub fn connect(self: *Self) !void {
     self.context = try zimq.Context.init();
-    self.socket = try zimq.Socket.init(self.context.?, .push);
+    // self.socket = try zimq.Socket.init(self.context.?, .push);
 
-    // Set socket options here, after socket is created
-    try self.socket.?.set(.sndhwm, 500);
+    // // Set socket options here, after socket is created
+    // try self.socket.?.set(.sndhwm, 500);
+    // try self.socket.?.set(.linger, 0);
+
+    self.socket = try zimq.Socket.init(self.context.?, .@"pub");
+
+    // Set high water mark to limit memory usage when no consumers are connected
+    try self.socket.?.set(.sndhwm, 100);
+
+    // Don't wait for unsent messages on close
     try self.socket.?.set(.linger, 0);
 
-    try self.socket.?.connect(self.stream_url);
+    // Prevents queueing when no peer exists (With immediate = 1: send fails until a peer connects)
+    // try self.socket.?.set(.immediate, true);
+
+    // Prevents dead peers from keeping queues alive.
+    try self.socket.?.set(.tcp_keepalive, 1);
+
+    // TODO try .bind if .connect fails or viceversa
+    try self.socket.?.bind(self.stream_url);
     std.debug.print("data stream connected!\n", .{});
 }
 
