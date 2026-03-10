@@ -62,7 +62,7 @@ pub fn connect(self: *Self) !void {
     try self.socket.?.set(.tcp_keepalive, 1);
 
     // TODO try .bind if .connect fails or viceversa
-    try self.socket.?.bind(self.stream_url);
+    try self.socket.?.connect(self.stream_url);
     std.debug.print("data stream connected!\n", .{});
 }
 
