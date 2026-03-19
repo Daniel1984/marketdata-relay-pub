@@ -10,7 +10,7 @@ context: ?*zimq.Context,
 socket: ?*zimq.Socket,
 
 pub const Opts = struct {
-    stream_url: []const u8 = "tcp://localhost:5555",
+    stream_url: []const u8 = "tcp://127.0.0.1:5555",
 };
 
 pub fn init(allocator: std.mem.Allocator, opts: Opts) !Self {
@@ -41,27 +41,20 @@ fn disconnect(self: *Self) void {
 
 pub fn connect(self: *Self) !void {
     self.context = try zimq.Context.init();
-    // self.socket = try zimq.Socket.init(self.context.?, .push);
-
-    // // Set socket options here, after socket is created
-    // try self.socket.?.set(.sndhwm, 500);
-    // try self.socket.?.set(.linger, 0);
-
     self.socket = try zimq.Socket.init(self.context.?, .@"pub");
 
-    // Set high water mark to limit memory usage when no consumers are connected
-    try self.socket.?.set(.sndhwm, 100);
+    // set high water mark to limit memory usage when no consumers are connected
+    try self.socket.?.set(.sndhwm, 500);
 
-    // Don't wait for unsent messages on close
+    // don't wait for unsent messages on close
     try self.socket.?.set(.linger, 0);
 
     // Prevents queueing when no peer exists (With immediate = 1: send fails until a peer connects)
     // try self.socket.?.set(.immediate, true);
 
-    // Prevents dead peers from keeping queues alive.
+    // prevents dead peers from keeping queues alive.
     try self.socket.?.set(.tcp_keepalive, 1);
 
-    // TODO try .bind if .connect fails or viceversa
     try self.socket.?.connect(self.stream_url);
     std.debug.print("data stream connected!\n", .{});
 }
@@ -123,3 +116,11 @@ pub fn publishMessage(self: *Self, pld: []u8) !void {
         }
     }
 }
+
+// fn sendWithTopic(self: *Self, socket: *zimq.Socket, topic: []const u8, pld: []const u8) !void {
+//     _ = self;
+//     // Send topic as first frame with SNDMORE flag
+//     try socket.sendSlice(topic, .{ .sndmore = true });
+//     // Send payload as second frame
+//     try socket.sendSlice(pld, .{});
+// }
