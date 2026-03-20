@@ -55,8 +55,8 @@ pub fn connect(self: *Self) !void {
     // prevents dead peers from keeping queues alive.
     try self.socket.?.set(.tcp_keepalive, 1);
 
-    // try self.socket.?.connect(self.stream_url);
-    try self.socket.?.bind(self.stream_url);
+    try self.socket.?.connect(self.stream_url);
+    // try self.socket.?.bind(self.stream_url);
     std.debug.print("data stream connected!\n", .{});
 }
 
