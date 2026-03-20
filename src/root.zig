@@ -29,13 +29,13 @@ pub fn deinit(self: *Self) void {
 }
 
 fn disconnect(self: *Self) void {
-    if (self.context) |ctx| {
-        ctx.deinit();
-        self.context = null;
-    }
     if (self.socket) |sock| {
         sock.deinit();
         self.socket = null;
+    }
+    if (self.context) |ctx| {
+        ctx.deinit();
+        self.context = null;
     }
 }
 
@@ -64,18 +64,16 @@ fn reconnect(self: *Self) void {
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    // check if another thread already reconnected
-    if (self.socket != null) {
-        return;
-    }
-
+    // Always disconnect first to clear any broken socket state before reconnecting.
+    // The previous guard (if socket != null return) was wrong: a failed send leaves
+    // socket non-null but broken, so the guard turned reconnect into a no-op.
     self.disconnect();
     std.log.info("attempting to reconnect stream...", .{});
 
     // Try to reconnect with exponential backoff
     var attempts: u32 = 0;
-    while (attempts < 5) {
-        const backoff_ms = (@as(u64, attempts) + 1) * 1000; // 1s, 2s, 3s, 4s, 5s
+    while (attempts < 10) {
+        const backoff_ms = (@as(u64, attempts) + 1) * 2000; // 1s, 2s, 3s, 4s, 5s
         std.Thread.sleep(backoff_ms * std.time.ns_per_ms);
 
         self.connect() catch |err| {
