@@ -44,18 +44,19 @@ pub fn connect(self: *Self) !void {
     self.socket = try zimq.Socket.init(self.context.?, .@"pub");
 
     // set high water mark to limit memory usage when no consumers are connected
-    try self.socket.?.set(.sndhwm, 500);
+    try self.socket.?.set(.sndhwm, 50);
 
     // don't wait for unsent messages on close
     try self.socket.?.set(.linger, 0);
 
-    // Prevents queueing when no peer exists (With immediate = 1: send fails until a peer connects)
-    // try self.socket.?.set(.immediate, true);
+    // prevents queueing when no peer exists (With immediate = 1: send fails until a peer connects)
+    try self.socket.?.set(.immediate, true);
 
     // prevents dead peers from keeping queues alive.
     try self.socket.?.set(.tcp_keepalive, 1);
 
-    try self.socket.?.connect(self.stream_url);
+    // try self.socket.?.connect(self.stream_url);
+    try self.socket.?.bind(self.stream_url);
     std.debug.print("data stream connected!\n", .{});
 }
 
