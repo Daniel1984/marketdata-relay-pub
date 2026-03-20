@@ -6,6 +6,7 @@ pub const Self = @This();
 allocator: std.mem.Allocator,
 stream_url: [:0]const u8,
 mutex: std.Thread.Mutex,
+reconnecting: std.atomic.Value(bool),
 context: ?*zimq.Context,
 socket: ?*zimq.Socket,
 
@@ -18,6 +19,7 @@ pub fn init(allocator: std.mem.Allocator, opts: Opts) !Self {
         .allocator = allocator,
         .stream_url = try allocator.dupeZ(u8, opts.stream_url),
         .mutex = std.Thread.Mutex{},
+        .reconnecting = std.atomic.Value(bool).init(false),
         .context = null,
         .socket = null,
     };
@@ -43,37 +45,39 @@ pub fn connect(self: *Self) !void {
     self.context = try zimq.Context.init();
     self.socket = try zimq.Socket.init(self.context.?, .@"pub");
 
-    // set high water mark to limit memory usage when no consumers are connected
+    // Drop messages once the outbound queue exceeds this limit.
+    // For market data, fresh data is more valuable than backlogged data.
     try self.socket.?.set(.sndhwm, 50);
 
-    // don't wait for unsent messages on close
+    // Don't wait for unsent messages on close.
     try self.socket.?.set(.linger, 0);
 
-    // prevents queueing when no peer exists (With immediate = 1: send fails until a peer connects)
-    try self.socket.?.set(.immediate, true);
+    // Note: immediate=true was removed. With immediate=true, ZMQ drops
+    // messages silently whenever the peer connection hasn't been fully
+    // confirmed yet (e.g. during relay restart or brief network blip).
+    // Those silent drops triggered false reconnect attempts which blocked
+    // the WebSocket consume loop, causing the exchange to kill the
+    // subscription due to missed pings.
 
-    // prevents dead peers from keeping queues alive.
+    // Detect and clean up dead TCP connections.
     try self.socket.?.set(.tcp_keepalive, 1);
 
     try self.socket.?.connect(self.stream_url);
-    // try self.socket.?.bind(self.stream_url);
     std.debug.print("data stream connected!\n", .{});
 }
 
-fn reconnect(self: *Self) void {
+fn doReconnect(self: *Self) void {
+    defer self.reconnecting.store(false, .release);
+
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    // Always disconnect first to clear any broken socket state before reconnecting.
-    // The previous guard (if socket != null return) was wrong: a failed send leaves
-    // socket non-null but broken, so the guard turned reconnect into a no-op.
     self.disconnect();
     std.log.info("attempting to reconnect stream...", .{});
 
-    // Try to reconnect with exponential backoff
     var attempts: u32 = 0;
     while (attempts < 10) {
-        const backoff_ms = (@as(u64, attempts) + 1) * 2000; // 1s, 2s, 3s, 4s, 5s
+        const backoff_ms = (@as(u64, attempts) + 1) * 1000; // 1s, 2s, 3s, 4s, 5s
         std.Thread.sleep(backoff_ms * std.time.ns_per_ms);
 
         self.connect() catch |err| {
@@ -89,37 +93,27 @@ fn reconnect(self: *Self) void {
     std.log.err("failed to reconnect stream after {} attempts", .{attempts});
 }
 
-pub fn publishMessage(self: *Self, pld: []u8) !void {
+// Spawns reconnect in a background thread so the caller (the WebSocket
+// consume loop) is never blocked. If a reconnect is already in progress,
+// subsequent calls are ignored.
+fn reconnect(self: *Self) void {
+    if (self.reconnecting.swap(true, .acquire)) return;
+
+    const thread = std.Thread.spawn(.{}, doReconnect, .{self}) catch |err| {
+        std.log.err("failed to spawn reconnect thread: {}", .{err});
+        self.reconnecting.store(false, .release);
+        return;
+    };
+    thread.detach();
+}
+
+pub fn publishMessage(self: *Self, pld: []u8) void {
     if (self.socket) |socket| {
         socket.sendSlice(pld, .{}) catch |err| {
             std.log.err("write to stream err: {}", .{err});
             self.reconnect();
-            if (self.socket) |retry_socket| {
-                retry_socket.sendSlice(pld, .{}) catch |retry_err| {
-                    std.log.err("reconnected failet to publish msg: {}", .{retry_err});
-                    return retry_err;
-                };
-            } else {
-                return error.ConnectionFailed;
-            }
         };
     } else {
         self.reconnect();
-        if (self.socket) |socket| {
-            socket.sendSlice(pld, .{}) catch |err| {
-                std.log.warn("failed to publish msg: {}", .{err});
-                return err;
-            };
-        } else {
-            return error.ConnectionFailed;
-        }
     }
 }
-
-// fn sendWithTopic(self: *Self, socket: *zimq.Socket, topic: []const u8, pld: []const u8) !void {
-//     _ = self;
-//     // Send topic as first frame with SNDMORE flag
-//     try socket.sendSlice(topic, .{ .sndmore = true });
-//     // Send payload as second frame
-//     try socket.sendSlice(pld, .{});
-// }
