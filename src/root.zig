@@ -109,7 +109,8 @@ fn reconnect(self: *Self) void {
 
 pub fn publishMessage(self: *Self, pld: []u8) void {
     if (self.socket) |socket| {
-        socket.sendSlice(pld, .{}) catch |err| {
+        // socket.sendSlice(pld, .{}) catch |err| {
+        socket.sendSlice(pld, .{ .dont_wait = true }) catch |err| {
             std.log.err("write to stream err: {}", .{err});
             self.reconnect();
         };
